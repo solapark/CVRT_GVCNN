@@ -20,7 +20,6 @@ from mmcv import Config, DictAction
 from mmcv.runner import get_dist_info, init_dist
 from os import path as osp
 import sys
-sys.path.insert(0, '/home/sapark/VEDet')
 
 from mmdet import __version__ as mmdet_version
 from mmdet3d import __version__ as mmdet3d_version
@@ -102,6 +101,10 @@ def parse_args():
 
 
 def main():
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root_dir not in sys.path:
+        sys.path.insert(0, root_dir)
+
     args = parse_args()
 
     cfg = Config.fromfile(args.config)
