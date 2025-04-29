@@ -39,7 +39,7 @@ img_norm_cfg = dict(mean=[103.530, 116.280, 123.675], std=[57.375, 57.120, 58.39
 class_names = ['water1', 'water2', 'pepsi', 'coca1', 'coca2', 'coca3', 'coca4', 'tea1', 'tea2', 'yogurt', 'ramen1', 'ramen2', 'ramen3', 'ramen4', 'ramen5', 'ramen6', 'ramen7', 'juice1', 'juice2', 'can1', 'can2', 'can3', 'can4', 'can5', 'can6', 'can7', 'can8', 'can9', 'ham1', 'ham2', 'pack1', 'pack2', 'pack3', 'pack4', 'pack5', 'pack6', 'snack1', 'snack2', 'snack3', 'snack4', 'snack5', 'snack6', 'snack7', 'snack8', 'snack9', 'snack10', 'snack11', 'snack12', 'snack13', 'snack14', 'snack15', 'snack16', 'snack17', 'snack18', 'snack19', 'snack20', 'snack21', 'snack22', 'snack23', 'snack24', 'green_apple', 'red_apple', 'tangerine', 'lime', 'lemon', 'yellow_quince', 'green_quince', 'white_quince', 'fruit1', 'fruit2', 'peach', 'banana', 'fruit3', 'pineapple', 'fruit4', 'strawberry', 'cherry', 'red_pimento', 'green_pimento', 'carrot', 'cabbage1', 'cabbage2', 'eggplant', 'bread', 'baguette', 'sandwich', 'hamburger', 'hotdog', 'donuts', 'cake', 'onion', 'marshmallow', 'mooncake', 'shirimpsushi', 'sushi1', 'sushi2', 'big_spoon', 'small_spoon', 'fork', 'knife', 'big_plate', 'small_plate', 'bowl', 'white_ricebowl', 'blue_ricebowl', 'black_ricebowl', 'green_ricebowl', 'black_mug', 'gray_mug', 'pink_mug', 'green_mug', 'blue_mug', 'blue_cup', 'orange_cup', 'yellow_cup', 'big_wineglass', 'small_wineglass', 'glass1', 'glass2', 'glass3']
 
 #input_modality = dict(use_lidar=False, use_camera=True, use_radar=False, use_map=False, use_external=False)
-save_dir = '/home/sapark/VEDet/result/tmvreid_messytable_rpn/26'
+save_dir = '/home/sapark/exp59_ddet/result/exp59'
 img_root = '/home/sapark/VEDet/data/MessyTable/images/' 
 reid_input_pickle_dir = '/home/sapark/VEDet_org/data/'
 bands, max_freq = 64, 8
@@ -84,8 +84,10 @@ model = dict(
     gt_depth_sup=False,  # use cache to supervise
     pts_bbox_head=dict(
         type='TMVReidHead',
+        all_view_cls_train=True,
         include_attn_map=True,
         #share_view_cls=True,
+        cross_attn2=True,
         emb_intrinsics=True,
         pred_size=pred_size,
         num_input=num_rpn_per_view,
@@ -103,6 +105,7 @@ model = dict(
         with_time=False,
         det_transformer=dict(
             type='TMvReidTransformer',
+            attn_mask_type = ['cross_attn', 'cross_attn'],
             det_decoder=dict(
                 type='TMVReidTransformerDecoder',
                 return_intermediate=True,
@@ -110,15 +113,16 @@ model = dict(
                 transformerlayers=dict(
                     type='TMVReidTransformerDecoderLayer',
                     attn_cfgs=[
-                        dict(type='TMVReidMultiheadSelfAttention', embed_dims=256, num_heads=8, dropout=0.1),
                         dict(type='TMVReidMultiheadCrossAttention', embed_dims=256, num_heads=8, dropout=0.1,
-                            attention=dict(type='MultiheadSuperAttention2', other_view_wgt=1., num_views=num_views, num_query=num_query, num_key=num_rpn_per_view, top_simK=1)
-                        ),
+                            attention=dict(type='MultiheadSVAttention', num_views=num_views, num_query=num_query, num_key=num_rpn_per_view)),
+                        dict(type='TMVReidMultiheadCrossAttention', embed_dims=256, num_heads=8, dropout=0.1,
+                            attention=dict(type='MultiheadMVAttention', num_views=num_views, num_query=num_query, num_key=num_rpn_per_view)),
                     ],
                     feedforward_channels=2048,
                     ffn_dropout=0.1,
                     with_cp=True,
-                    operation_order=('self_attn', 'norm', 'cross_attn', 'norm', 'ffn', 'norm')),
+                    operation_order=('cross_attn', 'norm', 'cross_attn', 'norm', 'ffn', 'norm'),
+                    ),
             )),
         bbox_coder=dict(
             #type='NMSFreeCoder',
@@ -148,7 +152,9 @@ model = dict(
         loss_bbox=dict(type='L1Loss', loss_weight=.25/10),
         loss_iou=dict(type='GIoULoss', loss_weight=0.0),
         loss_reid=dict(type='FocalLoss', use_sigmoid=True, gamma=2.0, alpha=0.25, loss_weight=2.0),
+        #loss_idx=dict(type='FocalLoss', use_sigmoid=True, activated=True, gamma=2.0, alpha=0.25, loss_weight=2.0),
         loss_idx=dict(type='FocalLoss', use_sigmoid=True, gamma=2.0, alpha=0.25, loss_weight=2.0),
+        loss_pos=dict(type='PosLoss', alpha=.2, loss_weight=2.0, valid_cost=.6, pos_thresh=5, neg_thresh=100),
     ),
     # model training and testing settings
     train_cfg=dict(
@@ -160,7 +166,7 @@ model = dict(
             assigner2_rpn_only=False,
             assigner2=dict(
                 type='EpipolarAssignerMtvReid2D',
-                valid_cost_thresh=.3),
+                valid_cost_thresh=.6),
             assigner=dict(
                 type='HungarianAssignerMtvReid2D',
                 cls_cost=dict(type='FocalLossCost', weight=0),
@@ -224,7 +230,7 @@ test_pipeline = [
 
 data = dict(
     samples_per_gpu=1,
-    workers_per_gpu=8,
+    workers_per_gpu=4,
     #workers_per_gpu=0,
     train=dict(
         type=dataset_type,
@@ -264,9 +270,9 @@ data = dict(
         pipeline=test_pipeline,
         #ann_file=data_root + 'mmdet3d_nuscenes_30f_infos_val.pkl',
         #ann_file=data_root + 'messytable_infos_test.pkl',
-        #ann_file=data_root + 'messytable_infos_train.pkl',
+        ann_file=data_root + 'messytable_infos_train.pkl',
         #ann_file=data_root + 'messytable_infos_test.pkl',
-        ann_file=data_root + 'messytable_infos_test.pkl',
+        #ann_file=data_root + 'messytable_infos_test.pkl',
 	img_root=img_root,
 	reid_input_pickle_dir=reid_input_pickle_dir,
         #ann_file=data_root + 'messytable_infos_debug.pkl',
@@ -294,13 +300,13 @@ lr_config = dict(
     min_lr_ratio=1e-3,
 )
 total_epochs = 200
-evaluation = dict(interval=10, pipeline=test_pipeline, metric=['bbox'], show=False, eval_thresh=.1, visible_thresh=.5, reid_thresh=.1, save_dir=save_dir, img_root=img_root, reid_config_dir='/home/sapark/VEDet/asnet_config', gt_path='/home/sapark/VEDet/data/MessyTable/labels/val.json')
-save_reid_pickle = dict(visible_thresh=.5, out_dir='/data3/sap/frcnn_keras_original/pickle/messytable/tmvreid_messytable_rpn23/reid_output/test')
+evaluation = dict(interval=10, pipeline=test_pipeline, metric=['bbox'], show=False, eval_thresh=.1, visible_thresh=.5, reid_thresh=.1, save_dir=save_dir, img_root=img_root)
+save_reid_pickle = dict(eval_thresh=.1, reid_thresh=.1, visible_thresh=.5, out_dir='/home/sapark/frcnn_keras_original/pickle/messytable/exp59/reid_output/train')
 #checkpoint_config = dict(interval=24)
 checkpoint_config = dict(interval=10)
 find_unused_parameters = False
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
 #load_from = 'ckpts/fcos3d_vovnet_imgbackbone-remapped.pth'
-load_from = 'work_dirs/tmvreid_messytable_rpn17/epoch_200.pth'
+load_from = 'work_dirs/tmvreid_messytable_rpn18/epoch_200.pth'
 resume_from = None

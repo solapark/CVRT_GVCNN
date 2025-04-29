@@ -1,13 +1,13 @@
 _base_ = [
-#    '/home/sap/VEDet/mmlab/mmdetection3d/configs/_base_/datasets/nus-3d.py',
-    '/home/sap/VEDet/mmlab/mmdetection3d/configs/_base_/default_runtime.py'
+#    '/home/sapark/VEDet/mmlab/mmdetection3d/configs/_base_/datasets/nus-3d.py',
+    '/home/sapark/VEDet/mmlab/mmdetection3d/configs/_base_/default_runtime.py'
 ]
 backbone_norm_cfg = dict(type='LN', requires_grad=True)
 plugin = True
 plugin_dir = 'projects/mmdet3d_plugin/'
 
 log_config = dict(
-    interval=100,
+    interval=50,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')
@@ -39,8 +39,13 @@ img_norm_cfg = dict(mean=[103.530, 116.280, 123.675], std=[57.375, 57.120, 58.39
 class_names = ['water1', 'water2', 'pepsi', 'coca1', 'coca2', 'coca3', 'coca4', 'tea1', 'tea2', 'yogurt', 'ramen1', 'ramen2', 'ramen3', 'ramen4', 'ramen5', 'ramen6', 'ramen7', 'juice1', 'juice2', 'can1', 'can2', 'can3', 'can4', 'can5', 'can6', 'can7', 'can8', 'can9', 'ham1', 'ham2', 'pack1', 'pack2', 'pack3', 'pack4', 'pack5', 'pack6', 'snack1', 'snack2', 'snack3', 'snack4', 'snack5', 'snack6', 'snack7', 'snack8', 'snack9', 'snack10', 'snack11', 'snack12', 'snack13', 'snack14', 'snack15', 'snack16', 'snack17', 'snack18', 'snack19', 'snack20', 'snack21', 'snack22', 'snack23', 'snack24', 'green_apple', 'red_apple', 'tangerine', 'lime', 'lemon', 'yellow_quince', 'green_quince', 'white_quince', 'fruit1', 'fruit2', 'peach', 'banana', 'fruit3', 'pineapple', 'fruit4', 'strawberry', 'cherry', 'red_pimento', 'green_pimento', 'carrot', 'cabbage1', 'cabbage2', 'eggplant', 'bread', 'baguette', 'sandwich', 'hamburger', 'hotdog', 'donuts', 'cake', 'onion', 'marshmallow', 'mooncake', 'shirimpsushi', 'sushi1', 'sushi2', 'big_spoon', 'small_spoon', 'fork', 'knife', 'big_plate', 'small_plate', 'bowl', 'white_ricebowl', 'blue_ricebowl', 'black_ricebowl', 'green_ricebowl', 'black_mug', 'gray_mug', 'pink_mug', 'green_mug', 'blue_mug', 'blue_cup', 'orange_cup', 'yellow_cup', 'big_wineglass', 'small_wineglass', 'glass1', 'glass2', 'glass3']
 
 #input_modality = dict(use_lidar=False, use_camera=True, use_radar=False, use_map=False, use_external=False)
+save_dir = '/home/sapark/exp59_ddet/result/exp59'
+img_root = '/home/sapark/VEDet/data/MessyTable/images/' 
+reid_input_pickle_dir = '/home/sapark/VEDet_org/data/'
 bands, max_freq = 64, 8
 num_views = 3
+num_query = 900
+num_rpn_per_view = 300
 num_classes = len(class_names)
 pred_size = 10 #cx, cy, cw, w, l, h, sin_rot, cos_rot, vx, vy
 #code_weights = [1.0] * 10 + [0.0] * 10 * num_views
@@ -48,8 +53,8 @@ code_weights = [0.0] * pred_size + [0.0] * pred_size * num_views
 #code_weights[8] = 0.2
 #code_weights[9] = 0.2
 #virtual_weights = 0.2
-virtual_weights = 1.
-wh_weights = 10.
+virtual_weights = 10.
+wh_weights = 5.
 for i in range(1, num_views + 1):
     code_weights[i * pred_size] = virtual_weights  # x
     code_weights[i * pred_size + 1] = virtual_weights  # y
@@ -63,27 +68,34 @@ for i in range(1, num_views + 1):
     #code_weights[i * 10 + 9] = 0.2 * virtual_weights  # vy
 model = dict(
     #type='VEDet',
-    type='TMVDet',
+    type='TMVReid',
     use_grid_mask=True,
-    img_backbone=dict(
-        type='VoVNetCP',
-        spec_name='V-99-eSE',
-        norm_eval=True,
-        frozen_stages=-1,
-        input_ch=3,
-        out_features=(
-            'stage4',
-            'stage5',
-        )),
-    img_neck=dict(type='CPFPN', in_channels=[768, 1024], out_channels=256, num_outs=2),
+    #img_backbone=dict(
+    #    type='VoVNetCP',
+    #    spec_name='V-99-eSE',
+    #    norm_eval=True,
+    #    frozen_stages=-1,
+    #    input_ch=3,
+    #    out_features=(
+    #        'stage4',
+    #        'stage5',
+    #    )),
+    #img_neck=dict(type='CPFPN', in_channels=[768, 1024], out_channels=256, num_outs=2),
     gt_depth_sup=False,  # use cache to supervise
     pts_bbox_head=dict(
-        type='TMVDetHead',
+        type='TMVReidHead',
+        all_view_cls_train=True,
+        include_attn_map=True,
+        #share_view_cls=True,
+        cross_attn2=True,
         emb_intrinsics=True,
         pred_size=pred_size,
+        num_input=num_rpn_per_view,
+        input_emb_size=128,
+        idx_emb_size=127,
         num_classes=num_classes,
         in_channels=256,
-        num_query=900,
+        num_query=num_query,
         position_range=point_cloud_range,
         reg_hidden_dims=[512, 512],
         code_size=(num_views + 1) * 10,
@@ -92,51 +104,57 @@ model = dict(
         num_decode_views=num_views,
         with_time=False,
         det_transformer=dict(
-            #type='VETransformer',
-            type='TMvdetTransformer',
+            type='TMvReidTransformer',
+            attn_mask_type = ['cross_attn', 'cross_attn'],
             det_decoder=dict(
-                type='PETRTransformerDecoder',
+                type='TMVReidTransformerDecoder',
                 return_intermediate=True,
                 num_layers=6,
                 transformerlayers=dict(
-                    type='PETRTransformerDecoderLayer',
+                    type='TMVReidTransformerDecoderLayer',
                     attn_cfgs=[
-                        dict(type='MultiheadAttention', embed_dims=256, num_heads=8, dropout=0.1),
-                        dict(type='PETRMultiheadAttention', embed_dims=256, num_heads=8, dropout=0.1),
+                        dict(type='TMVReidMultiheadCrossAttention', embed_dims=256, num_heads=8, dropout=0.1,
+                            attention=dict(type='MultiheadSVAttention', num_views=num_views, num_query=num_query, num_key=num_rpn_per_view)),
+                        dict(type='TMVReidMultiheadCrossAttention', embed_dims=256, num_heads=8, dropout=0.1,
+                            attention=dict(type='MultiheadMVAttention', num_views=num_views, num_query=num_query, num_key=num_rpn_per_view)),
                     ],
                     feedforward_channels=2048,
                     ffn_dropout=0.1,
                     with_cp=True,
-                    operation_order=('self_attn', 'norm', 'cross_attn', 'norm', 'ffn', 'norm')),
+                    operation_order=('cross_attn', 'norm', 'cross_attn', 'norm', 'ffn', 'norm'),
+                    ),
             )),
         bbox_coder=dict(
             #type='NMSFreeCoder',
-            type='TMVDetNMSFreeCoder',
-            #post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
-            pc_range=point_cloud_range,
+            #type='TMVDetNMSFreeCoder',
+            type='TMVReidNMSFreeCoder',
             max_num=300,
-            voxel_size=voxel_size,
+            num_views=num_views,
             num_classes=num_classes),
         input_ray_encoding=dict(
             type='FourierMLPEncoding',
-            input_channels=14,
-            hidden_dims=[int(1.5 * 14 * 2 * bands)],
+            input_channels=15,
+            hidden_dims=[int(1.5 * 15 * 2 * bands)],
             embed_dim=256,
             fourier_type='linear',
-            fourier_channels=14 * 2 * bands,
+            fourier_channels=15 * 2 * bands,
             max_frequency=max_freq),
         output_det_encoding=dict(
             type='FourierMLPEncoding',
-            input_channels=14,
-            hidden_dims=[int(1.5 * 14 * 2 * bands)],
+            input_channels=13,
+            hidden_dims=[int(1.5 * 13 * 2 * bands)],
             embed_dim=256,
             fourier_type='linear',
-            fourier_channels=14 * 2 * bands,
+            fourier_channels=13 * 2 * bands,
             max_frequency=max_freq),
         loss_cls=dict(type='FocalLoss', use_sigmoid=True, gamma=2.0, alpha=0.25, loss_weight=2.0),
         loss_visible=dict(type='FocalLoss', use_sigmoid=True, gamma=2.0, alpha=0.25, loss_weight=2.0),
-        loss_bbox=dict(type='L1Loss', loss_weight=0.25/50/2),
+        loss_bbox=dict(type='L1Loss', loss_weight=.25/10),
         loss_iou=dict(type='GIoULoss', loss_weight=0.0),
+        loss_reid=dict(type='FocalLoss', use_sigmoid=True, gamma=2.0, alpha=0.25, loss_weight=2.0),
+        #loss_idx=dict(type='FocalLoss', use_sigmoid=True, activated=True, gamma=2.0, alpha=0.25, loss_weight=2.0),
+        loss_idx=dict(type='FocalLoss', use_sigmoid=True, gamma=2.0, alpha=0.25, loss_weight=2.0),
+        loss_pos=dict(type='PosLoss', alpha=.2, loss_weight=2.0, valid_cost=.6, pos_thresh=5, neg_thresh=100),
     ),
     # model training and testing settings
     train_cfg=dict(
@@ -145,35 +163,37 @@ model = dict(
             voxel_size=voxel_size,
             point_cloud_range=point_cloud_range,
             out_size_factor=4,
+            assigner2_rpn_only=False,
+            assigner2=dict(
+                type='EpipolarAssignerMtvReid2D',
+                valid_cost_thresh=.6),
             assigner=dict(
-                #type='HungarianAssigner3D',
-                type='HungarianAssignerMtv2D',
-                cls_cost=dict(type='FocalLossCost', weight=2.0),
-                #reg_cost=dict(type='BBox3DL1Cost', weight=0.25),
-                reg_cost=dict(type='BBoxMtv2DL1Cost', weight=0.25, pred_size=pred_size, num_views=num_views),
-                iou_cost=dict(type='IoUCost',
-                              weight=0.0),  # Fake cost. This is just to make it compatible with DETR head. 
+                type='HungarianAssignerMtvReid2D',
+                cls_cost=dict(type='FocalLossCost', weight=0),
+                reg_cost=dict(type='BBoxMtv2DL1Cost', weight=0, pred_size=pred_size, num_views=num_views),
+                iou_cost=dict(type='BBoxMtv2DIoUCost', weight=0, pred_size=pred_size, num_views=num_views),  # Fake cost. This is just to make it compatible with DETR head. 
+                query_cost=dict(type='QueryCost', weight=1, num_views=num_views),  
                 align_with_loss=True,
                 pc_range=point_cloud_range))))
 
-dataset_type = 'CustomMessytableDataset'
+dataset_type = 'CustomMessytableRpnDataset'
 #data_root = 'data/nuscenes/'
-data_root = 'data/Messytable/'
+data_root = 'data/MessyTable/rpn/'
 
-file_client_args = dict(backend='disk')
-ida_aug_conf = {
+#file_client_args = dict(backend='disk')
+#ida_aug_conf = {
     #"resize_lim": (0.94, 1.25),
-    "resize_lim": (0.3, 0.4),
+#    "resize_lim": (0.3, 0.4),
     #"final_dim": (640, 1600),
-    "final_dim": (160, 400),
-    "bot_pct_lim": (0.0, 0.0),
-    "rot_lim": (0.0, 0.0),
+#    "final_dim": (160, 400),
+#    "bot_pct_lim": (0.0, 0.0),
+#    "rot_lim": (0.0, 0.0),
     #"H": 900,
-    "H": 1080,
+#    "H": 1080,
     #"W": 1600,
-    "W": 1920,
-    "rand_flip": True,
-}
+#    "W": 1920,
+#    "rand_flip": True,
+#}
 #meta_keys = ('filename', 'ori_shape', 'img_shape', 'lidar2img', 'depth2img', 'cam2img', 'pad_shape', 'scale_factor',
 #             'flip', 'pcd_horizontal_flip', 'pcd_vertical_flip', 'box_mode_3d', 'box_type_3d', 'img_norm_cfg',
 #             'pcd_trans', 'sample_idx', 'pcd_scale_factor', 'pcd_rotation', 'pts_filename', 'transformation_3d_flow',
@@ -181,49 +201,28 @@ ida_aug_conf = {
 meta_keys = ('filename', 'ori_shape', 'img_shape', 'lidar2img', 'depth2img', 'cam2img', 'pad_shape', 'scale_factor',
              'flip', 'pcd_horizontal_flip', 'pcd_vertical_flip', 'img_norm_cfg',
              'pcd_trans', 'sample_idx', 'pcd_scale_factor', 'pcd_rotation', 'pts_filename', 'transformation_3d_flow',
-             'intrinsics', 'extrinsics', 'scale_ratio', 'dec_extrinsics', 'timestamp')
+             'intrinsics', 'extrinsics', 'scale_ratio', 'dec_extrinsics', 'timestamp', 'rpn_x1y1x2y2')
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
+    dict(type='LoadMultiViewRpnFromFiles'),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_attr_label=False),
-    #dict(type='ObjectRangeFilter', point_cloud_range=point_cloud_range),
-    #dict(type='ObjectNameFilter', classes=class_names),
-    #dict(type='ResizeCropFlipImageFull3D', data_aug_conf=ida_aug_conf, training=True),
-    #dict(
-    #    type='GlobalRotScaleTransImage',
-    #    rot_range=[-0.3925, 0.3925],
-    #    translation_std=[0, 0, 0],
-    #    scale_ratio_range=[0.95, 1.05],
-    #    reverse_angle=True,
-    #    training=True),
-    #dict(type='ComputeMultiviewTargets', local_frame=True, visible_only=False, use_virtual=True, num_views=num_views),
-    dict(type='LoadMultiviewTargets', num_views=num_views),
-    #dict(type='NormalizeMultiviewImage', **img_norm_cfg),
-    #dict(type='ResizeMultiview3D', num_views=num_views, img_scale=(1080, 1920), ratio_range =[.3, .4]),
-    #dict(type='ResizeMultiview3D', num_views=num_views, img_scale=(1080, 1920), ratio_range =[.4, .4]),
-    dict(type='ResizeMultiview3D', num_views=num_views, img_scale=(1080, 1920), ratio_range =[.6, .6]),
-    dict(type='PadMultiViewImage', size_divisor=32),
+    dict(type='LoadMultiviewTargets', num_views=num_views, rpn_mode=True),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
-    dict(type='Collect3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img'], meta_keys=meta_keys)
+    dict(type='Collect3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'rpn_cxcywh', 'rpn_emb', 'rpn_prob'], meta_keys=meta_keys)
 ]
 test_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
+    dict(type='LoadMultiViewRpnFromFiles'),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_attr_label=False),
-    #dict(type='ResizeCropFlipImageFull3D', data_aug_conf=ida_aug_conf, training=False),
-    #dict(type='ComputeMultiviewTargets', local_frame=True, visible_only=False),
-    dict(type='LoadMultiviewTargets', num_views=num_views),
-    #dict(type='NormalizeMultiviewImage', **img_norm_cfg),
-    #dict(type='ResizeMultiview3D', num_views=num_views, img_scale=(1080, 1920), ratio_range =[.3, .4]),
-    #dict(type='ResizeMultiview3D', num_views=num_views, img_scale=(1080, 1920), ratio_range =[.4, .4]),
-    dict(type='ResizeMultiview3D', num_views=num_views, img_scale=(1080, 1920), ratio_range =[.6, .6]),
-    dict(type='PadMultiViewImage', size_divisor=32),
+    dict(type='LoadMultiviewTargets', num_views=num_views, rpn_mode=True),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
         pts_scale_ratio=1,
         flip=False,
         transforms=[
-            dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-            dict(type='Collect3D', keys=['img'], meta_keys=meta_keys)
+            dict(type='DefaultFormatBundle3D', class_names=class_names),
+            dict(type='Collect3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img', 'rpn_cxcywh', 'rpn_emb', 'rpn_prob'], meta_keys=meta_keys)
         ])
 
 ]
@@ -238,6 +237,8 @@ data = dict(
         data_root=data_root,
         #ann_file=data_root + 'mmdet3d_nuscenes_30f_infos_train.pkl',
         ann_file=data_root + 'messytable_infos_train.pkl',
+	img_root=img_root,
+	reid_input_pickle_dir=reid_input_pickle_dir,
         #ann_file=data_root + 'messytable_infos_debug.pkl',
         pipeline=train_pipeline,
         classes=class_names,
@@ -245,16 +246,19 @@ data = dict(
         #modality=input_modality,
         test_mode=False,
         use_valid_flag=True,
-        #num_load=1
         # we use box_type_3d='LiDAR' in kitti and nuscenes dataset
         # and box_type_3d='Depth' in sunrgbd and scannet dataset.
         #box_type_3d='LiDAR'
+        #num_load=1
         ),
     val=dict(
         type=dataset_type,
         pipeline=test_pipeline,
         #ann_file=data_root + 'mmdet3d_nuscenes_30f_infos_val.pkl',
+        #ann_file=data_root + 'messytable_infos_val.pkl',
         ann_file=data_root + 'messytable_infos_val.pkl',
+	img_root=img_root,
+	reid_input_pickle_dir=reid_input_pickle_dir,
         #ann_file=data_root + 'messytable_infos_debug.pkl',
         classes=class_names,
         num_views=num_views,
@@ -265,11 +269,18 @@ data = dict(
         type=dataset_type,
         pipeline=test_pipeline,
         #ann_file=data_root + 'mmdet3d_nuscenes_30f_infos_val.pkl',
+        #ann_file=data_root + 'messytable_infos_test.pkl',
+        #ann_file=data_root + 'messytable_infos_train.pkl',
+        #ann_file=data_root + 'messytable_infos_test.pkl',
         ann_file=data_root + 'messytable_infos_test.pkl',
+	img_root=img_root,
+	reid_input_pickle_dir=reid_input_pickle_dir,
         #ann_file=data_root + 'messytable_infos_debug.pkl',
         classes=class_names,
         num_views=num_views,
-        #modality=input_modality
+        #modality=input_modality,
+        #num_load=1,
+        #start_idx=65
         )
     )
 
@@ -289,14 +300,13 @@ lr_config = dict(
     min_lr_ratio=1e-3,
 )
 total_epochs = 200
-save_dir = '/data3/sap/VEDet/result/messytable7'
-evaluation = dict(interval=10, pipeline=test_pipeline, metric=['bbox'], show=False, eval_thresh=.1, save_dir=save_dir, img_root='/data1/sap/MessyTable/images/')
-#evaluation = dict(interval=2, pipeline=test_pipeline, metric=['bbox'], eval_thresh=.1, show=True, out_dir='/data3/sap/VEDet/result')
+evaluation = dict(interval=10, pipeline=test_pipeline, metric=['bbox'], show=False, eval_thresh=.1, visible_thresh=.5, reid_thresh=.1, save_dir=save_dir, img_root=img_root)
+save_reid_pickle = dict(eval_thresh=.1, reid_thresh=.1, visible_thresh=.5, out_dir='/home/sapark/frcnn_keras_original/pickle/messytable/exp59/reid_output/test')
 #checkpoint_config = dict(interval=24)
 checkpoint_config = dict(interval=10)
 find_unused_parameters = False
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
-load_from = 'ckpts/fcos3d_vovnet_imgbackbone-remapped.pth'
-#load_from = 'work_dirs/vedet_messytable2/epoch_24.pth'
+#load_from = 'ckpts/fcos3d_vovnet_imgbackbone-remapped.pth'
+load_from = 'work_dirs/tmvreid_messytable_rpn18/epoch_200.pth'
 resume_from = None
