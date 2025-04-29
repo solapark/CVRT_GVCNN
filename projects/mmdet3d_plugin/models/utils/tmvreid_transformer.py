@@ -1613,12 +1613,13 @@ class MultiheadSuperAttention2(nn.MultiheadAttention):
         return x
 
 class MultiheadSVAttention(nn.MultiheadAttention):
-    def set_args(self, num_views=3, num_query=900, num_key=300, scale_dot_type='mean', need_weights=False, **kwargs):
+    def set_args(self, num_views=3, num_query=900, num_key=300, scale_dot_type='mean', need_weights=False, attn_filtering=None, **kwargs):
         self.num_views = num_views
         self.num_query = num_query
         self.num_key = num_key
         self.scale_dot_type = scale_dot_type
         self.need_weights = need_weights
+        self.attn_filtering = attn_filtering
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = False, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
@@ -1992,7 +1993,13 @@ class MultiheadSVAttention(nn.MultiheadAttention):
         k = k.reshape(B, self.num_views, self.num_key, E).reshape(-1, self.num_key, E) #(8*3, 300, 32) 
         attn = torch.bmm(q, k.transpose(-2, -1)) #(8*3, 900, 300)
 
-        if self.scale_dot_type =='mean' or self.scale_dot_type =='pivot': 
+        if self.attn_filtering is not None :
+            topk_vals, topk_idx = torch.topk(attn, self.attn_filtering, dim=-1)
+            filtered_attn = torch.full_like(attn, float('-inf'))
+            filtered_attn.scatter_(-1, topk_idx, topk_vals)
+            attn = filtered_attn
+
+        if self.scale_dot_type in ['mean', 'pivot', 'max'] : 
             attn = F.softmax(attn, dim=-1)
 
             if dropout_p > 0.0:
@@ -2008,6 +2015,9 @@ class MultiheadSVAttention(nn.MultiheadAttention):
 
             if self.scale_dot_type =='pivot' : 
                 output = output[:, :1].repeat(1, self.num_views, 1, 1) #(B, 3, 900, 32) #first view to pivot
+
+            if self.scale_dot_type =='max' : 
+                output = output.max(1, keepdim=True)[0].repeat(1, self.num_views, 1, 1)  # (B, 3, 900, 32)
 
         elif self.scale_dot_type =='wgt_mean' : 
             attn = attn.reshape(B, self.num_views, self.num_query, self.num_key).transpose(2,1).reshape(B, self.num_query, self.num_views*self.num_key) #(8*3, 900, 300) -> #(8, 3, 900, 300) -> #(8, 900, 3*300)
