@@ -741,7 +741,7 @@ class TMVReidMultiheadCrossAttention(BaseModule):
             key = key.transpose(0, 1)
             value = value.transpose(0, 1)
           
-        out, attn_map = self.attn(query=query, key=key, value=value, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+        out, attn_map = self.attn(query=query, key=key, value=value, query_wo_pos=identity, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
 
         if self.batch_first:
             out = out.transpose(0, 1)
@@ -1613,15 +1613,29 @@ class MultiheadSuperAttention2(nn.MultiheadAttention):
         return x
 
 class MultiheadSVAttention(nn.MultiheadAttention):
-    def set_args(self, num_views=3, num_query=900, num_key=300, scale_dot_type='mean', need_weights=False, attn_filtering=None, **kwargs):
+    def set_args(self, num_views=3, num_query=900, num_key=300, scale_dot_type='mean', need_weights=False, self_view_weight=None, attn_filtering=None, query_attn=None, **kwargs):
         self.num_views = num_views
         self.num_query = num_query
         self.num_key = num_key
         self.scale_dot_type = scale_dot_type
         self.need_weights = need_weights
         self.attn_filtering = attn_filtering
+        self.self_view_weight = self_view_weight
 
-    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
+        self.query_attn = query_attn
+        if self.query_attn is not None :
+            from torch.nn import Parameter
+            from torch.nn.init import xavier_uniform_, constant_
+            factory_kwargs = {'device': self.in_proj_weight.device, 'dtype': self.in_proj_weight.dtype}
+            
+            self.q_wo_pos_proj_weight = Parameter(torch.empty((self.embed_dim, self.embed_dim), **factory_kwargs))   
+            self.q_wo_pos_proj_bias = Parameter(torch.empty(self.embed_dim, **factory_kwargs))
+            xavier_uniform_(self.q_wo_pos_proj_weight)
+            constant_(self.q_wo_pos_proj_bias, 0.0)
+
+            self.eye = torch.eye(self.num_views).unsqueeze(0) * self_view_weight  # (1, V, V)
+
+    def forward(self, query: Tensor, key: Tensor, value: Tensor, query_wo_pos: Tensor, key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = False, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
@@ -1665,11 +1679,11 @@ class MultiheadSVAttention(nn.MultiheadAttention):
         """
         need_weights = self.need_weights
         if self.batch_first:
-            query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+            query, key, value, query_wo_pos = [x.transpose(1, 0) for x in (query, key, value, query_wo_pos)]
 
         if not self._qkv_same_embed_dim:
             attn_output, attn_output_weights = self.multi_head_attention_forward(
-                query, key, value, self.embed_dim, self.num_heads,
+                query, key, value, query_wo_pos, self.embed_dim, self.num_heads,
                 self.in_proj_weight, self.in_proj_bias,
                 self.bias_k, self.bias_v, self.add_zero_attn,
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
@@ -1680,7 +1694,7 @@ class MultiheadSVAttention(nn.MultiheadAttention):
                 v_proj_weight=self.v_proj_weight)
         else:
             attn_output, attn_output_weights = self.multi_head_attention_forward(
-                query, key, value, self.embed_dim, self.num_heads,
+                query, key, value, query_wo_pos, self.embed_dim, self.num_heads,
                 self.in_proj_weight, self.in_proj_bias,
                 self.bias_k, self.bias_v, self.add_zero_attn,
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
@@ -1697,6 +1711,7 @@ class MultiheadSVAttention(nn.MultiheadAttention):
         query: Tensor,
         key: Tensor,
         value: Tensor,
+        query_wo_pos: Tensor,
         embed_dim_to_check: int,
         num_heads: int,
         in_proj_weight: Tensor,
@@ -1839,6 +1854,9 @@ class MultiheadSVAttention(nn.MultiheadAttention):
                 b_q, b_k, b_v = in_proj_bias.chunk(3)
             q, k, v = F._in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
 
+        if self.query_attn is not None :
+            query_wo_pos = F.linear(query_wo_pos, self.q_wo_pos_proj_weight, self.q_wo_pos_proj_bias)
+
         # prep attention mask
         if attn_mask is not None:
             if attn_mask.dtype == torch.uint8:
@@ -1883,6 +1901,8 @@ class MultiheadSVAttention(nn.MultiheadAttention):
         # reshape q, k, v for multihead attention and make em batch first
         #
         q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+        if self.query_attn is not None :
+            query_wo_pos = query_wo_pos.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
         if static_k is None:
             k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
         else:
@@ -1941,7 +1961,7 @@ class MultiheadSVAttention(nn.MultiheadAttention):
         #
         # (deep breath) calculate attention and out projection
         #
-        attn_output, attn_output_weights = self._scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, value)
+        attn_output, attn_output_weights = self._scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, value, query_wo_pos)
         attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
         attn_output = F.linear(attn_output, out_proj_weight, out_proj_bias)
 
@@ -1960,6 +1980,7 @@ class MultiheadSVAttention(nn.MultiheadAttention):
         attn_mask: Optional[Tensor] = None,
         dropout_p: float = 0.0,
         value: Tensor = None,
+        query_wo_pos: Tensor = None,
     ) -> Tuple[Tensor, Tensor]:
         r"""
         Computes scaled dot product attention on query, key and value tensors, using
@@ -1999,7 +2020,7 @@ class MultiheadSVAttention(nn.MultiheadAttention):
             filtered_attn.scatter_(-1, topk_idx, topk_vals)
             attn = filtered_attn
 
-        if self.scale_dot_type in ['mean', 'pivot', 'max'] : 
+        if self.scale_dot_type in ['mean', 'pivot', 'max', 'query_attn'] : 
             attn = F.softmax(attn, dim=-1)
 
             if dropout_p > 0.0:
@@ -2019,6 +2040,21 @@ class MultiheadSVAttention(nn.MultiheadAttention):
             if self.scale_dot_type =='max' : 
                 output = output.max(1, keepdim=True)[0].repeat(1, self.num_views, 1, 1)  # (B, 3, 900, 32)
 
+            if self.scale_dot_type =='query_attn' : 
+                query_wo_pos1 = query_wo_pos / math.sqrt(E) #(8, 2700, 32)
+                query_wo_pos1 = query_wo_pos1.reshape(B, self.num_views, self.num_query, E) #(8,3,900,32)
+                query_wo_pos1 = query_wo_pos1.transpose(1, 2) #(8,900,3,32)
+                query_wo_pos1 = query_wo_pos1.reshape(-1, self.num_views, E) #(8*900,3,32)
+                
+                query_attn = torch.bmm(query_wo_pos1, query_wo_pos1.transpose(-2,-1)) #(8*900,3,3)                
+                non_diag = query_attn.masked_fill(self.eye.bool().to(query_attn.device), float('-inf'))
+                soft = F.softmax(non_diag, dim=-1) * (1.0 - self.self_view_weight)
+                query_attn_soft = soft + self.eye.to(query_attn.device)
+
+                output = output.transpose(1, 2).reshape(-1, self.num_views, E)  #(B*900, 3, 32)
+                output = torch.bmm(query_attn_soft, output) #(8*900,3,32)
+                output = output.reshape(B, self.num_query, self.num_views, E).transpose(1, 2) #(8,3,900,32)
+
         elif self.scale_dot_type =='wgt_mean' : 
             attn = attn.reshape(B, self.num_views, self.num_query, self.num_key).transpose(2,1).reshape(B, self.num_query, self.num_views*self.num_key) #(8*3, 900, 300) -> #(8, 3, 900, 300) -> #(8, 900, 3*300)
             attn = F.softmax(attn, dim=-1) 
@@ -2032,6 +2068,7 @@ class MultiheadSVAttention(nn.MultiheadAttention):
 
         attn = attn.reshape(B, self.num_views, self.num_query, self.num_key).reshape(B, self.num_views*self.num_query, self.num_key) #(8, 3*900, 300)
         output = output.reshape(B, self.num_views*self.num_query, E) #(8, 3*900, 32)
+        3/0
         return output, attn
 
     def min_max_norm(self, x):
@@ -2062,7 +2099,7 @@ class MultiheadMVAttention(nn.MultiheadAttention):
         self.num_key = num_key
         self.need_weights = need_weights
 
-    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
+    def forward(self, query: Tensor, key: Tensor, value: Tensor, query_wo_pos: Tensor, key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
