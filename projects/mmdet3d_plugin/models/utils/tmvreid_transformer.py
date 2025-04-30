@@ -2068,7 +2068,6 @@ class MultiheadSVAttention(nn.MultiheadAttention):
 
         attn = attn.reshape(B, self.num_views, self.num_query, self.num_key).reshape(B, self.num_views*self.num_query, self.num_key) #(8, 3*900, 300)
         output = output.reshape(B, self.num_views*self.num_query, E) #(8, 3*900, 32)
-        3/0
         return output, attn
 
     def min_max_norm(self, x):
