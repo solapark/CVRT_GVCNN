@@ -110,6 +110,7 @@ class TMVReidHead(TMVDetHead):
                  loss_cross_attn_map=None,
                  loss_det_output=None,
                  loss_pos=None,
+                 loss_intra_view=None,
                  train_cfg=dict(
                      assigner=dict(
                          type='HungarianAssigner',
@@ -150,6 +151,7 @@ class TMVReidHead(TMVDetHead):
         self.rpn_idx_learnable = rpn_idx_learnable
         self.loss_det_output=loss_det_output
         self.loss_pos=loss_pos
+        self.loss_intra_view=loss_intra_view
         self.pos_encoding = pos_encoding
         self.pos_emb_cxcy_only = pos_emb_cxcy_only
         self.pos_emb_sig=pos_emb_sig
@@ -234,6 +236,7 @@ class TMVReidHead(TMVDetHead):
         self.loss_cross_attn_map = build_loss(loss_cross_attn_map) if loss_cross_attn_map else None
         self.loss_det_output = build_loss(loss_det_output) if loss_det_output else None
         self.loss_pos = build_loss(loss_pos) if loss_pos else None
+        self.loss_intra_view = build_loss(loss_intra_view) if loss_intra_view else None
 
 
         if self.loss_cls is not None and self.loss_cls.use_sigmoid:
@@ -780,7 +783,7 @@ class TMVReidHead(TMVDetHead):
             dict[str, Tensor]: A dictionary of loss components for outputs from
                 a single decoder layer.
         """
-        loss_cls, loss_visible, loss_bbox, loss_seg, loss_self_attn_map, loss_cross_attn_map, loss_rpn, loss_det_output, loss_pos = None, None, None, None, None, None, None, None, None
+        loss_cls, loss_visible, loss_bbox, loss_seg, loss_self_attn_map, loss_cross_attn_map, loss_rpn, loss_det_output, loss_pos, loss_intra_view = None, None, None, None, None, None, None, None, None, None
         if cls_scores is not None:
             num_imgs = cls_scores.size(0) #1
             cls_scores_list = [cls_scores[i] for i in range(num_imgs)]
@@ -876,6 +879,9 @@ class TMVReidHead(TMVDetHead):
             #det_outputs #(3, 900, 256)
             if self.loss_det_output is not None : 
                 loss_det_output = self.loss_det_output(det_outputs[0], self.query_cost)
+
+            if self.loss_intra_view is not None :
+                loss_intra_view = self.loss_intra_view(idx_scores_org[0], torch.cat(idx_weights_list, 0), bbox_targets, self.pred_box[0])
 
             if self.loss_pos is not None :
                 #(900, 3, 300), #(900, Ngt),  #(900, 3, 2), #(300, 3, 2)
@@ -1075,7 +1081,7 @@ class TMVReidHead(TMVDetHead):
             loss_seg = self.loss_seg(seg_preds, gt_seg_list[0])
             loss_seg = torch.nan_to_num(loss_seg)
 
-        return loss_cls, loss_visible, loss_reid, loss_idx, loss_bbox, loss_seg, loss_self_attn_map, loss_cross_attn_map, loss_rpn, loss_det_output, loss_pos
+        return loss_cls, loss_visible, loss_reid, loss_idx, loss_bbox, loss_seg, loss_self_attn_map, loss_cross_attn_map, loss_rpn, loss_det_output, loss_pos, loss_intra_view
 
     @force_fp32(apply_to=('preds_dicts'))
     def loss(
@@ -1176,9 +1182,9 @@ class TMVReidHead(TMVDetHead):
                 all_cross_attn_maps = [None] * num_dec_layers
 
             if self.debug : 
-                losses_cls, losses_visible, losses_reid, losses_idx, losses_bbox, losses_seg, losses_self_attn_map, losses_cross_attn_map, losses_rpn, losses_det_output, losses_pos = multi_apply(self.loss_single, all_cls_scores[-1:], all_visible_scores[-1:], all_reid_scores[-1:], all_idx_scores[-1:], all_bbox_preds[-1:], all_seg_preds[-1:], all_self_attn_maps[-1:], all_cross_attn_maps[-1:], all_det_outputs[-1:], all_gt_bboxes_list[-1:], all_gt_labels_list[-1:], all_gt_visibles_list[-1:], all_gt_idx_list[-1:], all_gt_proj_cxcy_list[-1:], all_gt_seg_list[-1:], all_gt_bboxes_ignore_list[-1:])
+                losses_cls, losses_visible, losses_reid, losses_idx, losses_bbox, losses_seg, losses_self_attn_map, losses_cross_attn_map, losses_rpn, losses_det_output, losses_pos, losses_intra_view = multi_apply(self.loss_single, all_cls_scores[-1:], all_visible_scores[-1:], all_reid_scores[-1:], all_idx_scores[-1:], all_bbox_preds[-1:], all_seg_preds[-1:], all_self_attn_maps[-1:], all_cross_attn_maps[-1:], all_det_outputs[-1:], all_gt_bboxes_list[-1:], all_gt_labels_list[-1:], all_gt_visibles_list[-1:], all_gt_idx_list[-1:], all_gt_proj_cxcy_list[-1:], all_gt_seg_list[-1:], all_gt_bboxes_ignore_list[-1:])
             else : 
-                losses_cls, losses_visible, losses_reid, losses_idx, losses_bbox, losses_seg, losses_self_attn_map, losses_cross_attn_map, losses_rpn, losses_det_output, losses_pos = multi_apply(self.loss_single, all_cls_scores, all_visible_scores, all_reid_scores, all_idx_scores, all_bbox_preds, all_seg_preds, all_self_attn_maps, all_cross_attn_maps, all_det_outputs, all_gt_bboxes_list, all_gt_labels_list, all_gt_visibles_list, all_gt_idx_list, all_gt_proj_cxcy_list, all_gt_seg_list, all_gt_bboxes_ignore_list)
+                losses_cls, losses_visible, losses_reid, losses_idx, losses_bbox, losses_seg, losses_self_attn_map, losses_cross_attn_map, losses_rpn, losses_det_output, losses_pos, losses_intra_view = multi_apply(self.loss_single, all_cls_scores, all_visible_scores, all_reid_scores, all_idx_scores, all_bbox_preds, all_seg_preds, all_self_attn_maps, all_cross_attn_maps, all_det_outputs, all_gt_bboxes_list, all_gt_labels_list, all_gt_visibles_list, all_gt_idx_list, all_gt_proj_cxcy_list, all_gt_seg_list, all_gt_bboxes_ignore_list)
 
             # loss of proposal generated from encode feature map.
             if enc_cls_scores is not None:
@@ -1206,6 +1212,8 @@ class TMVReidHead(TMVDetHead):
                     loss_dict['loss_det_output'] = losses_det_output[-1]
                 if losses_pos[0] is not None:
                     loss_dict['loss_pos'] = losses_pos[-1]
+                if losses_intra_view[0] is not None:
+                    loss_dict['loss_intra_view'] = losses_intra_view[-1]
 
                 # loss from other decoder layers
                 num_dec_layer = 0
@@ -1226,6 +1234,9 @@ class TMVReidHead(TMVDetHead):
                         loss_dict[f'd{num_dec_layer}.loss_det_output'] = losses_det_output[num_dec_layer]
                     if losses_pos[0] is not None:
                         loss_dict[f'd{num_dec_layer}.loss_pos'] = losses_pos[num_dec_layer]
+                    if losses_intra_view[0] is not None:
+                        loss_dict[f'd{num_dec_layer}.loss_intra_view'] = losses_intra_view[num_dec_layer]
+
 
                     num_dec_layer += 1
 
