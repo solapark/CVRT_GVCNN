@@ -114,7 +114,7 @@ model = dict(
                     type='TMVReidTransformerDecoderLayer',
                     attn_cfgs=[
                         dict(type='TMVReidMultiheadCrossAttention', embed_dims=256, num_heads=8, dropout=0.1,
-                            attention=dict(type='MultiheadSVAttention', num_views=num_views, num_query=num_query, num_key=num_rpn_per_view, scale_dot_type='query_attn', query_attn='forward', self_view_weight=.2, attn_filtering=1)),
+                            attention=dict(type='MultiheadSVAttention', num_views=num_views, num_query=num_query, num_key=num_rpn_per_view, scale_dot_type='query_attn', attn_filtering=1, query_attn='forward', self_view_weight=.2)),
                         dict(type='TMVReidMultiheadCrossAttention', embed_dims=256, num_heads=8, dropout=0.1,
                             attention=dict(type='MultiheadMVAttention', num_views=num_views, num_query=num_query, num_key=num_rpn_per_view)),
                     ],
