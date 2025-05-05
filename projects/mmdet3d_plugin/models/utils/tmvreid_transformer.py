@@ -21,6 +21,7 @@ from mmcv.utils import (ConfigDict, build_from_cfg, deprecated_api_warning, to_2
 import torch.utils.checkpoint as cp
 
 from .vedet_transformer import VETransformer
+from .gvcnn import GVCNN
 
 @TRANSFORMER.register_module()
 class TMvReidTransformer(VETransformer):
@@ -1613,7 +1614,7 @@ class MultiheadSuperAttention2(nn.MultiheadAttention):
         return x
 
 class MultiheadSVAttention(nn.MultiheadAttention):
-    def set_args(self, num_views=3, num_query=900, num_key=300, scale_dot_type='mean', need_weights=False, self_view_weight=None, attn_filtering=None, query_attn=None, **kwargs):
+    def set_args(self, num_views=3, num_query=900, num_key=300, scale_dot_type='mean', need_weights=False, self_view_weight=None, attn_filtering=None, query_attn=None, num_group=None, **kwargs):
         self.num_views = num_views
         self.num_query = num_query
         self.num_key = num_key
@@ -1634,6 +1635,9 @@ class MultiheadSVAttention(nn.MultiheadAttention):
             constant_(self.q_wo_pos_proj_bias, 0.0)
 
             self.eye = torch.eye(self.num_views).unsqueeze(0) * self_view_weight  # (1, V, V)
+
+        if scale_dot_type == 'GVCNN' :
+            self.gvcnn = GVCNN(in_channels=self.embed_dim, num_grps=num_group)
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor, query_wo_pos: Tensor, key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = False, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
@@ -2020,11 +2024,28 @@ class MultiheadSVAttention(nn.MultiheadAttention):
             filtered_attn.scatter_(-1, topk_idx, topk_vals)
             attn = filtered_attn
 
-        if self.scale_dot_type in ['mean', 'pivot', 'max', 'query_attn'] : 
-            attn = F.softmax(attn, dim=-1)
+        attn = F.softmax(attn, dim=-1)
 
-            if dropout_p > 0.0:
-                attn = F.dropout(attn, p=dropout_p)
+        if dropout_p > 0.0:
+            attn = F.dropout(attn, p=dropout_p)
+
+        if self.scale_dot_type in ['GVCNN', 'MVCNN'] :
+            v = v.reshape(B, self.num_views, self.num_key, E).reshape(-1, self.num_key, E) #(8*3, 300, 32)
+
+            v_exp = v.unsqueeze(1).expand(-1, self.num_query, -1, -1)  # [B*num_views, num_query, num_key, E]
+            topk_idx_exp = topk_idx.unsqueeze(-1).expand(-1, -1, -1, E)  # [B*num_views, num_query, K, E]
+            RPs = torch.gather(v_exp, 2, topk_idx_exp)  # [B*num_views, num_query, K, E]
+            RPs_reshape = RPs.reshape(B, self.num_views, self.num_query, self.attn_filtering, E) #(8,3,900,k,32)
+            RPs_reshape2 = RPs_reshape.permute(2, 1, 3, 0, 4) #(900,3,k,8,32)
+            RPs_reshape3 = RPs_reshape2.reshape(self.num_query, self.num_views*self.attn_filtering, B*E) #(900, 3*K, 8*32)
+            if self.scale_dot_type == 'GVCNN' :
+                output = self.gvcnn(RPs_reshape3) #(900, 8*32)
+                output = output.reshape(self.num_query, 1, B, E).transpose(0,2).repeat(1, self.num_views, 1, 1)  #(8,3,900,32)
+
+            elif self.scale_dot_type == 'MVCNN' :
+                output = RPs_reshape3.max(1, keepdim=True)[0].repeat(1, self.num_views, 1).reshape(self.num_query, self.num_views, B, E).permute(2, 1, 0, 3)  # (B, 3, 900, 32)
+
+        elif self.scale_dot_type in ['mean', 'pivot', 'max', 'query_attn'] : 
             # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
             v = v.reshape(B, self.num_views, self.num_key, E).reshape(-1, self.num_key, E) #(8*3, 300, 32)
             output = torch.bmm(attn, v) #(B*3, 900, 32)
@@ -2054,17 +2075,6 @@ class MultiheadSVAttention(nn.MultiheadAttention):
                 output = output.transpose(1, 2).reshape(-1, self.num_views, E)  #(B*900, 3, 32)
                 output = torch.bmm(query_attn_soft, output) #(8*900,3,32)
                 output = output.reshape(B, self.num_query, self.num_views, E).transpose(1, 2) #(8,3,900,32)
-
-        elif self.scale_dot_type =='wgt_mean' : 
-            attn = attn.reshape(B, self.num_views, self.num_query, self.num_key).transpose(2,1).reshape(B, self.num_query, self.num_views*self.num_key) #(8*3, 900, 300) -> #(8, 3, 900, 300) -> #(8, 900, 3*300)
-            attn = F.softmax(attn, dim=-1) 
-
-            if dropout_p > 0.0:
-                attn = F.dropout(attn, p=dropout_p)
-
-            output = torch.bmm(attn,  v) #(8, 900, 32)
-            output = output.unsqueeze(1).repeat(1, self.num_views, 1, 1) #(B, 3, 900, 32)
-            attn = attn.reshape(B, self.num_query, self.num_views, self.num_key).transpose(1,2).reshape(B*self.num_views, self.num_query, self.num_key) #(8, 900, 3, 300) -> (8, 3, 900, 300) -> (8*3, 900, 300)
 
         attn = attn.reshape(B, self.num_views, self.num_query, self.num_key).reshape(B, self.num_views*self.num_query, self.num_key) #(8, 3*900, 300)
         output = output.reshape(B, self.num_views*self.num_query, E) #(8, 3*900, 32)

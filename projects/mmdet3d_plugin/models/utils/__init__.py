@@ -11,8 +11,10 @@ from .vedet_transformer import VETransformer
 from .tmvdet_transformer import TMvdetTransformer
 from .tmvreid_transformer import TMvReidTransformer, TMVReidTransformerDecoder, TMVReidTransformerDecoderLayer, TMVReidMultiheadSelfAttention, TMVReidMultiheadCrossAttention
 from .positional_encoding import FourierMLPEncoding
+from .gvcnn import GVCNN
 
 __all__ = [
     'PETRTransformer', 'PETRMultiheadAttention', 'PETRTransformerEncoder', 'PETRTransformerDecoder', 'VETransformer', 'TMvdetTransformer', 'TMvReidTransformer', 'TMVReidTransformerDecoder', 'TMVReidTransformerDecoderLayer', 'TMVReidMultiheadSelfAttention', 'TMVReidMultiheadCrossAttention',
-    'FourierMLPEncoding'
+    'FourierMLPEncoding',
+    'GVCNN'
 ]
