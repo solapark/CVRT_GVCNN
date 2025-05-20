@@ -1614,7 +1614,7 @@ class MultiheadSuperAttention2(nn.MultiheadAttention):
         return x
 
 class MultiheadSVAttention(nn.MultiheadAttention):
-    def set_args(self, num_views=3, num_query=900, num_key=300, scale_dot_type='mean', need_weights=False, self_view_weight=None, attn_filtering=None, query_attn=None, num_group=None, **kwargs):
+    def set_args(self, num_views=3, num_query=900, num_key=300, scale_dot_type='mean', need_weights=False, self_view_weight=None, attn_filtering=None, query_attn=None, **kwargs):
         self.num_views = num_views
         self.num_query = num_query
         self.num_key = num_key
@@ -1637,7 +1637,7 @@ class MultiheadSVAttention(nn.MultiheadAttention):
             self.eye = torch.eye(self.num_views).unsqueeze(0) * self_view_weight  # (1, V, V)
 
         if scale_dot_type == 'GVCNN' :
-            self.gvcnn = GVCNN(in_channels=self.embed_dim, num_grps=num_group)
+            self.gvcnn = GVCNN(in_channels=self.embed_dim)
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor, query_wo_pos: Tensor, key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = False, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
@@ -2020,9 +2020,6 @@ class MultiheadSVAttention(nn.MultiheadAttention):
 
         if self.attn_filtering is not None :
             topk_vals, topk_idx = torch.topk(attn, self.attn_filtering, dim=-1)
-            filtered_attn = torch.full_like(attn, float('-inf'))
-            filtered_attn.scatter_(-1, topk_idx, topk_vals)
-            attn = filtered_attn
 
         attn = F.softmax(attn, dim=-1)
 
